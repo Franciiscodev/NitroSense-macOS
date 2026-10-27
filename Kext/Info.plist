@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleExecutable</key>
+	<string>NitroEC</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.nitrosense.NitroEC</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>NitroEC</string>
+	<key>CFBundlePackageType</key>
+	<string>KEXT</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.0</string>
+	<key>CFBundleVersion</key>
+	<string>1.0.0</string>
+	<key>IOKitPersonalities</key>
+	<dict>
+		<key>NitroEC</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.nitrosense.NitroEC</string>
+			<key>IOClass</key>
+			<string>NitroEC</string>
+			<key>IONameMatch</key>
+			<string>NTRO0001</string>
+			<key>IOProviderClass</key>
+			<string>IOACPIPlatformDevice</string>
+			<key>IOUserClientClass</key>
+			<string>NitroECUserClient</string>
+		</dict>
+	</dict>
+	<key>NSHumanReadableCopyright</key>
+	<string>GPL-3.0 (EC map from Packss/Linux-NitroSense and MehmetCanWT/OpeNitro)</string>
+	<key>OSBundleLibraries</key>
+	<dict>
+		<key>com.apple.iokit.IOACPIFamily</key>
+		<string>1.0.0d1</string>
+		<key>com.apple.kpi.iokit</key>
+		<string>19.0</string>
+		<key>com.apple.kpi.libkern</key>
+		<string>19.0</string>
+		<key>com.apple.kpi.mach</key>
+		<string>19.0</string>
+	</dict>
+	<key>OSBundleRequired</key>
+	<string>Root</string>
+</dict>
+</plist>
