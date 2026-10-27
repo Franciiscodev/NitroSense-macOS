@@ -27,6 +27,7 @@ like the Windows original.
 - **Battery charge limit (80 %)**, **USB charging when powered off**.
 - **Monitoring**: CPU / GPU temperature, CPU load and CPU package power (W) with 5-minute graphs
   and a hover readout; whole-machine draw while on battery.
+- The **NitroSense key** above the keyboard opens the window (press again to close it).
 - **Menu bar** readout of CPU · GPU temperature with quick controls. The app starts in the
   background at login; open it from the menu bar, Launchpad or Finder.
 - Settings live in a root daemon and are **re-applied at boot and after sleep** (the firmware
@@ -54,7 +55,7 @@ nitroctl ───────┼─ /var/run/nitrod.sock ─ nitrod (root) ─ 
 
 | Part | What it does |
 | --- | --- |
-| `ACPI/SSDT-NITRO.dsl` | Adds `\_SB.NTRO` (`_HID NTRO0001`, Darwin only) with methods to read/write EC RAM and call the firmware WMI methods `WMBH` (gaming) and `WMBE` (battery health). |
+| `ACPI/SSDT-NITRO.dsl` | Adds `\_SB.NTRO` (`_HID NTRO0001`, Darwin only) with methods to read/write EC RAM and call the firmware WMI methods `WMBH` (gaming) and `WMBE` (battery health). Also gives VoodooPS2 an `RMCF` that maps the NitroSense key (PS/2 `e0 75`) to F20, which the app catches as a hotkey. |
 | `Kext/` NitroEC.kext | Matches `NTRO0001` and exposes a user client: read byte, dump, and **whitelisted** writes / WMI calls (only the registers and opcodes listed below; root only). Puts the fans back to Auto when unloaded. |
 | `Daemon/` nitrod | Root LaunchDaemon. Keeps `config.json`, re-applies it at start / wake, runs the fan curve and failsafe every 2 s, reads CPU power from `powermetrics`, serves the app over a Unix socket. |
 | `App/` NitroSense.app | SwiftUI app styled after NitroSense 3. Talks only to nitrod, needs no root. |

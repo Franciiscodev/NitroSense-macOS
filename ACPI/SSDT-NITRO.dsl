@@ -8,11 +8,30 @@
  * v1: read-only. v2: WE1B byte write. v3: WMBX -> firmware WMBH (gaming WMI).
  * v4: WMEX -> firmware WMBE (battery health WMI). Which offsets/values may be written is
  * decided by NitroEC.kext (whitelist), so new features need no SSDT change.
+ *
+ * Also gives VoodooPS2Keyboard an RMCF that maps the NitroSense key (PS/2 scancode e0 75,
+ * "KEYBOARD_KEY_f5" in Linux hwdb) to F20 so NitroSense.app can catch it as a hotkey.
  */
 DefinitionBlock ("", "SSDT", 2, "NITRO", "NITROEC", 0x00001000)
 {
     External (_SB_.PC00.WMID.WMBE, MethodObj)    // 3 Arguments
     External (_SB_.PC00.WMID.WMBH, MethodObj)    // 3 Arguments
+    External (_SB_.PC00.LPCB.PS2K, DeviceObj)
+
+    Scope (\_SB.PC00.LPCB.PS2K)
+    {
+        Name (RMCF, Package ()
+        {
+            "Keyboard", Package ()
+            {
+                "Custom ADB Map", Package ()
+                {
+                    Package () {},
+                    "e075=5a",  // NitroSense key -> F20
+                },
+            },
+        })
+    }
 
     Scope (\_SB)
     {

@@ -1,3 +1,4 @@
+import Carbon
 import SwiftUI
 
 // Starts in the background (menu bar only, no Dock icon) when launched with
@@ -23,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     static private(set) weak var shared: AppDelegate?
     let model: NitroModel
     private var window: NSWindow?
+    private var nitroKey: NitroKeyWatcher?
+    private var lastToggle = Date.distantPast
+    private var hideDockIcon: DispatchWorkItem?
     private let args = CommandLine.arguments
 
     override init() {
@@ -59,6 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             exit(0)
         }
         LoginItem.configureOnFirstRun()
+        nitroKey = NitroKeyWatcher { [weak self] in self?.toggleMainWindow() }
         if !args.contains("--background") {
             showMainWindow()
         }
@@ -87,13 +92,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             w.center()
             window = w
         }
-        NSApp.setActivationPolicy(.regular)
+        hideDockIcon?.cancel()
+        if NSApp.activationPolicy() != .regular {
+            NSApp.setActivationPolicy(.regular)
+        }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    // The NitroSense key opens the window, or closes it when it is already in front.
+    // Presses closer than 0.5 s are dropped: flipping the activation policy that fast
+    // leaves stale NitroSense tiles in the Dock.
+    func toggleMainWindow() {
+        let now = Date()
+        guard now.timeIntervalSince(lastToggle) > 0.5 else { return }
+        lastToggle = now
+        if let window, window.isVisible, window.isKeyWindow, NSApp.isActive {
+            window.performClose(nil)
+        } else {
+            showMainWindow()
+        }
+    }
+
     func windowWillClose(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        // Drop the Dock icon a moment later, unless the window comes back first.
+        let work = DispatchWorkItem { [weak self] in
+            guard self?.window?.isVisible != true else { return }
+            NSApp.setActivationPolicy(.accessory)
+        }
+        hideDockIcon = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6, execute: work)
+    }
+}
+
+// The NitroSense key sends PS/2 scancode e0 75, which SSDT-NITRO maps to F20 for
+// VoodooPS2Keyboard. A Carbon hotkey catches it without Accessibility permission.
+final class NitroKeyWatcher {
+    private let onPress: () -> Void
+    private var hotKey: EventHotKeyRef?
+    private var handler: EventHandlerRef?
+
+    init?(onPress: @escaping () -> Void) {
+        self.onPress = onPress
+        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
+        let status = InstallEventHandler(GetApplicationEventTarget(), { _, _, refcon in
+            guard let refcon else { return OSStatus(eventNotHandledErr) }
+            Unmanaged<NitroKeyWatcher>.fromOpaque(refcon).takeUnretainedValue().onPress()
+            return noErr
+        }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), &handler)
+        guard status == noErr,
+              RegisterEventHotKey(UInt32(kVK_F20), 0, EventHotKeyID(signature: 0x4E54524F, id: 1),
+                                  GetApplicationEventTarget(), 0, &hotKey) == noErr
+        else { return nil }
+    }
+
+    deinit {
+        if let hotKey { UnregisterEventHotKey(hotKey) }
+        if let handler { RemoveEventHandler(handler) }
     }
 }
 
