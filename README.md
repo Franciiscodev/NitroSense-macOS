@@ -99,7 +99,7 @@ limit.
 2. Remove the quarantine flag and run the installer:
 
    ```bash
-   cd NitroSense-macOS-1.0.0
+   cd NitroSense-macOS-<version>
    xattr -dr com.apple.quarantine .
    ./Scripts/install-all.sh
    ```
