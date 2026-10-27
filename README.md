@@ -83,6 +83,8 @@ limit.
 
 - An **Acer Nitro 5 AN515-57** Hackintosh (Intel 11th gen) booting with **OpenCore**, with the
   OpenCore EFI on `disk0s1` (override with `EFI_DISK=diskXsY`).
+  My full EFI and kexts for this model are in
+  [Hackintosh-Acer-Nitro-5-AN515-57](https://github.com/ptnzzn/Hackintosh-Acer-Nitro-5-AN515-57).
 - macOS 15.5 or newer (tested on macOS 26.7.1).
 - SIP configured to allow unsigned kexts (`csr-active-config` with `CSR_ALLOW_UNTRUSTED_KEXTS`),
   as on most Hackintoshes that load third-party kexts from `/Library/Extensions`.
