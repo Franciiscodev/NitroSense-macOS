@@ -183,7 +183,14 @@ struct FanControlPanel: View {
                 Spacer()
             }
         } accessory: {
-            HStack(spacing: 8) {
+            HStack(spacing: 12) {
+                HStack(spacing: 6) {
+                    Text("CoolBoost™").font(.system(size: 11)).foregroundStyle(NS.text)
+                    HexToggle(isOn: model.config.coolBoost) { on in
+                        model.config.coolBoost = on
+                        model.set(["coolBoost": on], delay: 0)
+                    }
+                }
                 if fan.mode == "curve" {
                     Text("CPU \(s.cpuDuty)%" + (fan.curveGPU ? " · GPU \(s.gpuDuty)%" : ""))
                         .font(.system(size: 11)).foregroundStyle(NS.dim).monospacedDigit()
@@ -212,7 +219,7 @@ struct FanSide: View {
             Text(name).font(.system(size: 14, weight: .medium)).foregroundStyle(NS.text)
             Text("\(temp)°C").font(.system(size: 11)).foregroundStyle(tempColor(temp)).monospacedDigit()
             if let percent {
-                RedSlider(value: Double(percent), range: 20...100, step: 5) { commit(Int($0)) }
+                RedSlider(value: Double(percent), range: 0...100, step: 5) { commit(Int($0)) }
                     .frame(width: 120)
                 HStack {
                     if alignment == .leading { Text("\(percent)%").monospacedDigit() }
@@ -649,6 +656,10 @@ struct MenuContent: View {
                         }
                     }
                 }
+            }
+            SettingRow(label: "CoolBoost™", isOn: model.config.coolBoost) {
+                model.config.coolBoost = $0
+                model.set(["coolBoost": $0], delay: 0)
             }
             SettingRow(label: "Battery charge limit (80%)", isOn: model.config.batteryLimit) {
                 model.config.batteryLimit = $0

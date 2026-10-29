@@ -3,7 +3,7 @@ import Foundation
 // MARK: - main
 
 let args = Array(CommandLine.arguments.dropFirst())
-let usage = "usage: nitroctl [status | dump | read <offset> | watch [seconds]]\n       sudo nitroctl fan [--wmi] [cpu|gpu|all] auto|max|manual <20-100>\n       sudo nitroctl psee on|off\n       sudo nitroctl wmbh <op> [hex bytes...]\n       sudo nitroctl mode quiet|default|extreme\n       sudo nitroctl battery limit on|off|status\n       sudo nitroctl led init | restore | zone <1-4|all> <RRGGBB> | effect <name> [speed] [RRGGBB] [dir1|dir2] | brightness <0-100> | off\n       sudo nitroctl usb-charge on|off\n       sudo nitroctl kb-timeout on|off\n       nitroctl daemon [status | apply | set '<json>'] [--json]"
+let usage = "usage: nitroctl [status | dump | read <offset> | watch [seconds]]\n       sudo nitroctl fan [--wmi] [cpu|gpu|all] auto|max|manual <0-100>\n       sudo nitroctl coolboost on|off\n       sudo nitroctl psee on|off\n       sudo nitroctl wmbh <op> [hex bytes...]\n       sudo nitroctl mode quiet|default|extreme\n       sudo nitroctl battery limit on|off|status\n       sudo nitroctl led init | restore | zone <1-4|all> <RRGGBB> | effect <name> [speed] [RRGGBB] [dir1|dir2] | brightness <0-100> | off\n       sudo nitroctl usb-charge on|off\n       sudo nitroctl kb-timeout on|off\n       nitroctl daemon [status | apply | set '<json>'] [--json]"
 
 func ledCommand(_ ec: NitroEC, _ args: [String]) throws {
     guard let sub = args.first else {
@@ -140,6 +140,13 @@ do {
         }
         try setPSEE(ec, args[1] == "on")
         print("PSEE \(args[1]) (0x03 = \(hex(try ec.readByte(UInt8(Reg.battery)))))")
+    case "coolboost":
+        guard args.count == 2, ["on", "off"].contains(args[1]) else {
+            print(usage)
+            exit(2)
+        }
+        try setCoolBoost(ec, args[1] == "on")
+        print("CoolBoost \(args[1]) (0x10 = \(hex(try ec.readByte(UInt8(Reg.coolBoost)))))")
     case "mode":
         guard args.count == 2 else {
             print(usage)

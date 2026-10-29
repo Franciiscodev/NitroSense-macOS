@@ -78,6 +78,9 @@ final class Daemon {
     let ec: NitroEC
     var config: NitroConfig
     var failsafe = false
+    var failsafeHits = 0
+    var cpuTempWindow: [Int] = []       // 6 s moving-average filter (3 × 2 s, matching nbfc-linux)
+    var gpuTempWindow: [Int] = []
     var duty: [FanUnit: Int] = [:]      // last duty written by the curve
     var lowerCount: [FanUnit: Int] = [:]
     var cpuPower: Double?
@@ -120,11 +123,8 @@ final class Daemon {
     func applyAll(reason: String) {
         log("apply (\(reason))")
         step("psee") { try setPSEE(ec, true) }
-        step("mode") { try setNitroMode(ec, config.nitroMode) }
-        step("battery limit") { try setBatteryLimit(ec, config.batteryLimit) }
         step("usb charge") { try setUSBCharge(ec, config.usbCharge) }
         step("kb timeout") { try setKBTimeout(ec, config.kbTimeout) }
-        step("led") { try applyLEDConfig() }
         applyFans()
     }
 
@@ -158,6 +158,8 @@ final class Daemon {
         if failsafe { return }
         step("fans") {
             try setPSEE(ec, true)
+            let isManualOrCurve = config.fan.mode == "manual" || config.fan.mode == "curve"
+            _ = try? setCoolBoost(ec, isManualOrCurve ? false : config.coolBoost)
             for unit in FanUnit.allCases {
                 switch config.fan.mode {
                 case "max":
@@ -175,25 +177,41 @@ final class Daemon {
         if config.fan.mode == "curve" { tick() }
     }
 
+    func filterTemp(_ window: inout [Int], _ sample: UInt8) -> UInt8 {
+        window.append(Int(sample))
+        if window.count > 3 { window.removeFirst(window.count - 3) }
+        return UInt8(window.reduce(0, +) / window.count)
+    }
+
     func tick() {
         guard let d = try? ec.dump() else { return }
-        let temps: [FanUnit: UInt8] = [.cpu: d[Reg.cpuTemp], .gpu: d[Reg.gpuTemp]]
-        let hottest = max(temps[.cpu]!, temps[.gpu]!)
+        let cpuT = filterTemp(&cpuTempWindow, d[Reg.cpuTemp])
+        let gpuT = filterTemp(&gpuTempWindow, readGPUTemp(d))
+        // With -wegnoegpu (dGPU disabled), gpuT may read sysTemp; use max(cpuT, gpuT) for GPU curve.
+        let temps: [FanUnit: UInt8] = [.cpu: cpuT, .gpu: max(cpuT, gpuT)]
+        let hottest = max(cpuT, gpuT)
 
         let failsafeOn = UInt8(config.fan.failsafeTemp)
         let failsafeOff = failsafeOn - 10
-        if !failsafe && hottest >= failsafeOn {
-            failsafe = true
-            log("failsafe ON at \(hottest) °C: fans max")
-        } else if failsafe && hottest <= failsafeOff {
+        if !failsafe {
+            if hottest >= failsafeOn {
+                failsafeHits += 1
+                if failsafeHits >= 2 {
+                    failsafe = true
+                    log("failsafe ON at \(hottest) °C: fans max")
+                }
+            } else {
+                failsafeHits = 0
+            }
+        } else if hottest <= failsafeOff {
             failsafe = false
+            failsafeHits = 0
             log("failsafe OFF at \(hottest) °C: back to \(config.fan.mode)")
             applyFans()
             return
         }
         if failsafe {
             step("failsafe") {
-                try setPSEE(ec, true)
                 for unit in FanUnit.allCases where Int(d[unit.modeReg]) != unit.max {
                     try ec.writeByte(unit.modeReg, unit.max)
                 }
@@ -201,9 +219,29 @@ final class Daemon {
             return
         }
 
+        if config.fan.mode == "max" {
+            step("max") {
+                for unit in FanUnit.allCases where Int(d[unit.modeReg]) != unit.max {
+                    try ec.writeByte(unit.modeReg, unit.max)
+                }
+            }
+            return
+        }
+
+        if config.fan.mode == "manual" {
+            step("manual") {
+                for unit in FanUnit.allCases {
+                    let target = unit == .cpu ? config.fan.cpuPercent : config.fan.gpuPercent
+                    if Int(d[unit.modeReg]) != unit.manual || Int(d[unit.speedReg]) != target {
+                        try setUnit(unit, manualPercent: target)
+                    }
+                }
+            }
+            return
+        }
+
         guard config.fan.mode == "curve" else { return }
         step("curve") {
-            if d[Reg.battery] & 0x10 == 0 { try setPSEE(ec, true) }
             for unit in FanUnit.allCases where curveDrives(unit) {
                 let target = curvePercent(config.fan.curve, Int(temps[unit]!))
                 let current = duty[unit]
@@ -228,6 +266,7 @@ final class Daemon {
     func shutdown() {
         log("stopping: fans back to Auto")
         powerMeter.stop()
+        _ = try? setCoolBoost(ec, config.coolBoost)
         for unit in FanUnit.allCases {
             _ = try? ec.writeByte(unit.modeReg, unit.auto)
         }
@@ -270,7 +309,7 @@ final class Daemon {
                 if old.usbCharge != next.usbCharge { step("usb charge") { try setUSBCharge(ec, next.usbCharge) } }
                 if old.kbTimeout != next.kbTimeout { step("kb timeout") { try setKBTimeout(ec, next.kbTimeout) } }
                 if old.led != next.led { step("led") { try applyLEDConfig() } }
-                if old.fan != next.fan { applyFans() }
+                if old.fan != next.fan || old.coolBoost != next.coolBoost { applyFans() }
                 log("config updated")
                 return statusReply()
             } catch {

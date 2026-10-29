@@ -1,5 +1,23 @@
+# Build & release artifacts
 build/
 dist/
-.tools/
+
+# External tools (keep bundled .tools/iasl script)
+.tools/*
+!.tools/iasl
+
+# Reference dumps / external repos (if placed inside project root)
+acpi/
+nbfc-linux-main/
+
+# macOS / Editor files
 .DS_Store
+.AppleDouble
+.LSOverride
+._*
 *.bak-*
+*.swp
+*~
+.vscode/
+.idea/
+.swiftpm/

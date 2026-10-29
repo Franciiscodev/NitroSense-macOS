@@ -371,7 +371,7 @@ struct CurvePanel: View {
                         HStack(spacing: 6) {
                             StepField(text: "\(curve[i].temp)°", minus: { curve[i].temp = max(30, curve[i].temp - 1) },
                                       plus: { curve[i].temp = min(100, curve[i].temp + 1) })
-                            StepField(text: "\(curve[i].percent)%", minus: { curve[i].percent = max(20, curve[i].percent - 5) },
+                            StepField(text: "\(curve[i].percent)%", minus: { curve[i].percent = max(0, curve[i].percent - 5) },
                                       plus: { curve[i].percent = min(100, curve[i].percent + 5) })
                             Button { curve.remove(at: i) } label: {
                                 Image(systemName: "xmark").font(.system(size: 10)).foregroundStyle(curve.count > 2 ? NS.dim : NS.faint)

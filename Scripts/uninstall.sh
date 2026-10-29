@@ -1,5 +1,5 @@
 #!/bin/bash
-# Remove NitroSense Phase 1: kext from /Library/Extensions, SSDT entry from OpenCore.
+# Remove NitroSense Phase 1: NitroEC.kext and SSDT-NITRO.aml from OpenCore (and /Library/Extensions if present).
 #   sudo ./Scripts/uninstall.sh
 set -euo pipefail
 
@@ -8,10 +8,12 @@ PB=/usr/libexec/PlistBuddy
 
 [[ $EUID -eq 0 ]] || { echo "Run with sudo"; exit 1; }
 
-kmutil unload -b com.nitrosense.NitroEC 2>/dev/null || true
-rm -rf /Library/Extensions/NitroEC.kext
-kmutil clear-staging 2>/dev/null || true
-echo "Removed NitroEC.kext"
+if [[ -d /Library/Extensions/NitroEC.kext ]]; then
+    kmutil unload -b com.nitrosense.NitroEC 2>/dev/null || true
+    rm -rf /Library/Extensions/NitroEC.kext
+    kmutil clear-staging 2>/dev/null || true
+    echo "Removed /Library/Extensions/NitroEC.kext"
+fi
 
 was_mounted=1
 EFI_MNT="$(diskutil info "$EFI_DISK" | awk -F': *' '/Mount Point/ {print $2}')"
@@ -32,6 +34,16 @@ for ((i = n - 1; i >= 0; i--)); do
     fi
 done
 rm -f "$OC/ACPI/SSDT-NITRO.aml"
+
+k=$("$PB" -c "Print :Kernel:Add" "$CONFIG" | grep -c "BundlePath = ")
+for ((i = k - 1; i >= 0; i--)); do
+    if [[ "$("$PB" -c "Print :Kernel:Add:${i}:BundlePath" "$CONFIG")" == "NitroEC.kext" ]]; then
+        "$PB" -c "Delete :Kernel:Add:${i}" "$CONFIG"
+        echo "Removed NitroEC.kext from Kernel > Add (index ${i})"
+    fi
+done
+rm -rf "$OC/Kexts/NitroEC.kext"
+
 plutil -lint "$CONFIG"
 [[ $was_mounted -eq 1 ]] || diskutil unmount "$EFI_MNT" >/dev/null 2>&1 \
     || diskutil unmount force "$EFI_MNT" >/dev/null 2>&1 \

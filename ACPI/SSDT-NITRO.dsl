@@ -1,8 +1,8 @@
 /*
- * SSDT-NITRO — EC access for NitroEC.kext on Acer Nitro 5 AN515-57 (macOS only).
+ * SSDT-NITRO — EC access for NitroEC.kext on Acer Nitro 5 AN515-52 (macOS only).
  *
- * The firmware maps EC RAM 1:1 at SystemMemory 0xFE0B0800 (DSDT regions PECM/ECMM
- * under \_SB.PC00.LPCB.EC0) and accesses every EC field through it. We use the
+ * The firmware maps EC RAM 1:1 at SystemMemory 0xFC7E0800 (DSDT region ECMM
+ * under \_SB.PCI0.LPCB.EC0) and accesses every EC field through it. We use the
  * same window, with the same Lock semantics, so no raw 0x62/0x66 port I/O happens.
  *
  * v1: read-only. v2: WE1B byte write. v3: WMBX -> firmware WMBH (gaming WMI).
@@ -14,11 +14,11 @@
  */
 DefinitionBlock ("", "SSDT", 2, "NITRO", "NITROEC", 0x00001000)
 {
-    External (_SB_.PC00.WMID.WMBE, MethodObj)    // 3 Arguments
-    External (_SB_.PC00.WMID.WMBH, MethodObj)    // 3 Arguments
-    External (_SB_.PC00.LPCB.PS2K, DeviceObj)
+    External (_SB_.PCI0.WMID.WMBE, MethodObj)    // 3 Arguments
+    External (_SB_.PCI0.WMID.WMBH, MethodObj)    // 3 Arguments
+    External (_SB_.PCI0.LPCB.PS2K, DeviceObj)
 
-    Scope (\_SB.PC00.LPCB.PS2K)
+    Scope (\_SB.PCI0.LPCB.PS2K)
     {
         Name (RMCF, Package ()
         {
@@ -56,8 +56,8 @@ DefinitionBlock ("", "SSDT", 2, "NITRO", "NITROEC", 0x00001000)
                 Return (0x04)
             }
 
-            // EC RAM window 0x00..0xFF, same mapping as the firmware's PECM
-            OperationRegion (ERDM, SystemMemory, 0xFE0B0800, 0x0100)
+            // EC RAM window 0x00..0xFF, same mapping as the firmware's ECMM (0xFC7E0800)
+            OperationRegion (ERDM, SystemMemory, 0xFC7E0800, 0x0100)
             Field (ERDM, ByteAcc, Lock, Preserve)
             {
                 BUF0,   2048
@@ -83,7 +83,7 @@ DefinitionBlock ("", "SSDT", 2, "NITRO", "NITROEC", 0x00001000)
                     Return (Ones)
                 }
 
-                OperationRegion (EWB1, SystemMemory, (0xFE0B0800 + Arg0), One)
+                OperationRegion (EWB1, SystemMemory, (0xFC7E0800 + Arg0), One)
                 Field (EWB1, ByteAcc, Lock, Preserve)
                 {
                     BYT0,   8
@@ -98,9 +98,9 @@ DefinitionBlock ("", "SSDT", 2, "NITRO", "NITROEC", 0x00001000)
             // whitelisted by NitroEC.kext.
             Method (WMBX, 2, Serialized)
             {
-                If (CondRefOf (\_SB.PC00.WMID.WMBH))
+                If (CondRefOf (\_SB.PCI0.WMID.WMBH))
                 {
-                    Return (\_SB.PC00.WMID.WMBH (Zero, Arg0, Arg1))
+                    Return (\_SB.PCI0.WMID.WMBH (Zero, Arg0, Arg1))
                 }
 
                 Return (Buffer (0x04)
@@ -113,9 +113,9 @@ DefinitionBlock ("", "SSDT", 2, "NITRO", "NITROEC", 0x00001000)
             // WMEX (method, Buffer) -> WMBE (0, method, Buffer). Whitelisted by the kext.
             Method (WMEX, 2, Serialized)
             {
-                If (CondRefOf (\_SB.PC00.WMID.WMBE))
+                If (CondRefOf (\_SB.PCI0.WMID.WMBE))
                 {
-                    Return (\_SB.PC00.WMID.WMBE (Zero, Arg0, Arg1))
+                    Return (\_SB.PCI0.WMID.WMBE (Zero, Arg0, Arg1))
                 }
 
                 Return (Buffer (0x04)

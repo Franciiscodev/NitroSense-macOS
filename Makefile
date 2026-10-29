@@ -1,4 +1,4 @@
-# NitroSense for macOS (Hackintosh, Acer Nitro 5 AN515-57)
+# NitroSense for macOS (Hackintosh, Acer Nitro 5 AN515-52)
 # Needs Command Line Tools (clang, swiftc, MacOSX.sdk with Kernel.framework) and iasl.
 
 SDK      := $(shell xcrun --show-sdk-path)
@@ -10,7 +10,7 @@ KEXT     := $(BUILD)/NitroEC.kext
 KEXT_SRC := Kext/NitroEC.cpp Kext/NitroEC_info.c
 KEXT_HDR := Kext/NitroEC.hpp Kext/NitroECShared.h
 
-KFLAGS := -arch x86_64 -mmacosx-version-min=15.5 -isysroot $(SDK) \
+KFLAGS := -arch x86_64 -mmacosx-version-min=14.0 -isysroot $(SDK) \
 	-I$(SDK)/System/Library/Frameworks/Kernel.framework/Headers \
 	-mkernel -nostdlib -fno-builtin -fno-common -fno-stack-protector \
 	-DKERNEL -DKERNEL_PRIVATE -DDRIVER_PRIVATE -DAPPLE -DNeXT -O2 -Wall
@@ -40,7 +40,7 @@ $(KEXT)/Contents/Info.plist: Kext/Info.plist
 cli: $(BUILD)/nitroctl
 $(BUILD)/nitroctl: CLI/main.swift Core/NitroCore.swift Core/NitroConfig.swift Kext/NitroECShared.h
 	@mkdir -p $(BUILD)
-	swiftc -O -target x86_64-apple-macos15.0 -import-objc-header Kext/NitroECShared.h Core/NitroCore.swift Core/NitroConfig.swift CLI/main.swift -o $@
+	swiftc -O -target x86_64-apple-macos14.0 -module-cache-path $(BUILD)/module-cache -import-objc-header Kext/NitroECShared.h Core/NitroCore.swift Core/NitroConfig.swift CLI/main.swift -o $@
 
 clean:
 	rm -rf $(BUILD)
@@ -48,7 +48,7 @@ clean:
 daemon: $(BUILD)/nitrod
 $(BUILD)/nitrod: Daemon/main.swift Core/NitroCore.swift Core/NitroConfig.swift Kext/NitroECShared.h
 	@mkdir -p $(BUILD)
-	swiftc -O -target x86_64-apple-macos15.0 -import-objc-header Kext/NitroECShared.h Core/NitroCore.swift Core/NitroConfig.swift Daemon/main.swift -o $@
+	swiftc -O -target x86_64-apple-macos14.0 -module-cache-path $(BUILD)/module-cache -import-objc-header Kext/NitroECShared.h Core/NitroCore.swift Core/NitroConfig.swift Daemon/main.swift -o $@
 
 APP     := $(BUILD)/NitroSense.app
 APP_SRC := App/NitroSenseApp.swift App/Model.swift App/Theme.swift App/Views.swift App/Dialogs.swift Core/NitroCore.swift Core/NitroConfig.swift
@@ -64,7 +64,7 @@ $(APP)/Contents/Resources/AppIcon.icns: App/Resources/AppIcon.icns
 	cp $< $@
 $(APP)/Contents/MacOS/NitroSense: $(APP_SRC) Kext/NitroECShared.h
 	@mkdir -p $(dir $@)
-	swiftc -O -swift-version 5 -parse-as-library -target x86_64-apple-macos15.0 \
+	swiftc -O -swift-version 5 -parse-as-library -disable-sandbox -target x86_64-apple-macos14.0 -module-cache-path $(BUILD)/module-cache \
 		-import-objc-header Kext/NitroECShared.h $(APP_SRC) -o $@
 $(APP)/Contents/Info.plist: App/Info.plist
 	@mkdir -p $(dir $@)
@@ -79,6 +79,6 @@ release: all
 	cp -R $(BUILD)/NitroSense.app $(BUILD)/NitroEC.kext $(BUILD)/SSDT-NITRO.aml $(BUILD)/nitrod $(BUILD)/nitroctl $(REL)/build/
 	cp Scripts/install-all.sh Scripts/install.sh Scripts/install-daemon.sh Scripts/install-app.sh \
 	   Scripts/uninstall.sh Scripts/uninstall-daemon.sh Scripts/check-reapply.sh $(REL)/Scripts/
-	cp README.md LICENSE $(REL)/
+	cp README.md PORTING.md LICENSE $(REL)/
 	cd dist && ditto -c -k --keepParent NitroSense-macOS-$(VERSION) NitroSense-macOS-$(VERSION).zip
 	shasum -a 256 $(REL).zip

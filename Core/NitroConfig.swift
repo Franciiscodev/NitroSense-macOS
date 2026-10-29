@@ -16,14 +16,14 @@ struct FanConfig: Codable, Equatable {
     var mode = "auto"  // auto | max | manual | curve
     var cpuPercent = 60
     var gpuPercent = 60
-    // The EC keeps the GPU fan above ~4500 RPM in manual (20 % -> 4545 RPM, Auto ~4100),
-    // so by default the curve drives only the CPU fan and leaves the GPU fan on Auto.
-    var curveGPU = false
+    // Drive both fans on the curve by default on AN515-52 (shared heatpipes, as in nbfc).
+    var curveGPU = true
     // Both fans go to max at this temperature (any mode) until 10 °C below it.
-    var failsafeTemp = 95
-    var curve = [FanCurvePoint(temp: 50, percent: 30), FanCurvePoint(temp: 60, percent: 40),
-                 FanCurvePoint(temp: 70, percent: 55), FanCurvePoint(temp: 80, percent: 75),
-                 FanCurvePoint(temp: 88, percent: 100)]
+    var failsafeTemp = 90
+    // Thresholds adapted from nbfc-linux Acer Nitro AN515-51 / AN515-54 configs.
+    var curve = [FanCurvePoint(temp: 45, percent: 30), FanCurvePoint(temp: 55, percent: 40),
+                 FanCurvePoint(temp: 65, percent: 50), FanCurvePoint(temp: 72, percent: 65),
+                 FanCurvePoint(temp: 80, percent: 80), FanCurvePoint(temp: 85, percent: 100)]
 }
 
 struct LEDConfig: Codable, Equatable {
@@ -37,6 +37,7 @@ struct LEDConfig: Codable, Equatable {
 
 struct NitroConfig: Codable, Equatable {
     var fan = FanConfig()
+    var coolBoost = true
     var nitroMode = "default"
     var batteryLimit = false
     var usbCharge = true
@@ -50,11 +51,11 @@ struct NitroConfig: Codable, Equatable {
             if !ok { throw NitroECError(description: "invalid config: \(what)") }
         }
         try check(Self.fanModes.contains(fan.mode), "fan.mode must be \(Self.fanModes.joined(separator: "|"))")
-        try check((20...100).contains(fan.cpuPercent) && (20...100).contains(fan.gpuPercent), "fan percent must be 20-100")
+        try check((0...100).contains(fan.cpuPercent) && (0...100).contains(fan.gpuPercent), "fan percent must be 0-100")
         try check((70...98).contains(fan.failsafeTemp), "fan.failsafeTemp must be 70-98")
         try check((2...8).contains(fan.curve.count), "fan.curve needs 2-8 points")
         for (i, p) in fan.curve.enumerated() {
-            try check((30...100).contains(p.temp) && (20...100).contains(p.percent), "curve point \(i) out of range")
+            try check((30...100).contains(p.temp) && (0...100).contains(p.percent), "curve point \(i) out of range")
             if i > 0 {
                 try check(p.temp > fan.curve[i - 1].temp && p.percent >= fan.curve[i - 1].percent,
                           "curve must rise with temperature")
@@ -72,6 +73,7 @@ struct NitroConfig: Codable, Equatable {
     init(fromEC ec: [UInt8]) {
         func hexRGB(_ o: Int) -> String { String(format: "%02X%02X%02X", ec[o], ec[o + 1], ec[o + 2]) }
         if let mode = nitroModes.first(where: { $0.value == ec[Reg.nitroMode] })?.key { nitroMode = mode }
+        coolBoost = isCoolBoostOn(ec)
         batteryLimit = ec[Reg.battery] & 0x40 != 0
         usbCharge = ec[Reg.usbCharge] != 0x1F
         kbTimeout = ec[Reg.kbTimeout] != 0x00
@@ -125,7 +127,7 @@ func curvePercent(_ curve: [FanCurvePoint], _ temp: Int) -> Int {
         p = Double(a.percent) + Double(b.percent - a.percent) * Double(temp - a.temp) / Double(b.temp - a.temp)
     }
     let stepped = Int((p / 5).rounded(.up)) * 5
-    return min(max(stepped, 20), 100)
+    return min(max(stepped, 0), 100)
 }
 
 // One request per connection: a JSON object terminated by newline; the reply is one JSON object.

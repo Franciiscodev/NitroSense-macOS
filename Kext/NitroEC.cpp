@@ -10,13 +10,14 @@
 OSDefineMetaClassAndStructors(NitroEC, IOService)
 OSDefineMetaClassAndStructors(NitroECUserClient, IOUserClient)
 
-// MARK: - Write whitelist (AN515-57, verified against DSDT + OpeNitro/Packss)
+// MARK: - Write whitelist (AN515-52 / AN515-57, verified against DSDT + nbfc-linux + OpeNitro)
 
 enum : uint32_t {
     kRegPowerFlags  = 0x03,  // LMEN bit0, PSEE bit4 (set by firmware WMBH 0x05), BTHE bit6
     kPSEEBit        = 0x10,
     kRegKBTimeout   = 0x06,  // 0x1E = backlight off after 30 s idle, 0x00 = always on
     kRegUSBCharge   = 0x08,  // 0x0F = USB power-off charging on, 0x1F = off
+    kRegCoolBoost   = 0x10,  // 0x01 = CoolBoost on, 0x00 = CoolBoost off (from nbfc AN515-51/52/54)
     kRegGPUFanMode  = 0x21,
     kRegCPUFanMode  = 0x22,
     kRegCPUFanSpeed = 0x37,
@@ -25,9 +26,8 @@ enum : uint32_t {
     kCPUFanAuto = 0x04, kCPUFanMax = 0x08, kCPUFanManual = 0x0C,
     kGPUFanAuto = 0x10, kGPUFanMax = 0x20, kGPUFanManual = 0x30,
 
-    // Manual duty is a percentage: firmware WMBH 0x10 rejects > 100. Below 20 %
-    // is refused so a typo can never park a fan.
-    kFanSpeedMin = 20, kFanSpeedMax = 100,
+    // Manual duty is a percentage (0-100 %, matching nbfc-linux AN515 configs).
+    kFanSpeedMin = 0, kFanSpeedMax = 100,
 
     // Firmware gaming WMI (\_SB.PC00.WMID.WMBH) opcodes. 0x01-0x04, 0x08-0x0F,
     // 0x18, 0x19 are forwarded to BIOS SMM (WSMI); the rest touch EC fields.
@@ -56,6 +56,8 @@ bool NitroEC::isWriteAllowed(uint32_t offset, uint32_t value) {
     case kRegCPUFanSpeed:
     case kRegGPUFanSpeed:
         return value >= kFanSpeedMin && value <= kFanSpeedMax;
+    case kRegCoolBoost:
+        return value == 0x00 || value == 0x01;
     case kRegKBTimeout:
         return value == 0x00 || value == 0x1E;
     case kRegUSBCharge:
@@ -157,6 +159,7 @@ void NitroEC::stop(IOService *provider) {
     // Never leave the fans in manual mode without a driver behind them.
     writeByte(kRegCPUFanMode, kCPUFanAuto);
     writeByte(kRegGPUFanMode, kGPUFanAuto);
+    writeByte(kRegCoolBoost, 0x01);
     OSSafeReleaseNULL(acpi);
     IOService::stop(provider);
 }

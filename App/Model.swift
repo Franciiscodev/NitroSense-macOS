@@ -15,22 +15,24 @@ struct Snapshot: Equatable {
     var acPlugged = false
     var batteryState = ""
     var psee = false
+    var coolBoost = false
 
     init() {}
 
     init(_ ec: [UInt8]) {
         cpuTemp = Int(ec[Reg.cpuTemp])
-        gpuTemp = Int(ec[Reg.gpuTemp])
-        sysTemp = Int(ec[Reg.sysTemp])
+        gpuTemp = Int(readGPUTemp(ec))
+        sysTemp = Int(readSysTemp(ec))
         cpuRPM = Int(ec[Reg.cpuFanRPM]) | Int(ec[Reg.cpuFanRPM + 1]) << 8
         gpuRPM = Int(ec[Reg.gpuFanRPM]) | Int(ec[Reg.gpuFanRPM + 1]) << 8
         cpuFanMode = ec[Reg.cpuFanMode]
         gpuFanMode = ec[Reg.gpuFanMode]
         cpuDuty = Int(ec[Reg.cpuFanSpeed])
         gpuDuty = Int(ec[Reg.gpuFanSpeed])
-        acPlugged = ec[Reg.acStatus] & 0x01 == 1
+        acPlugged = isACPlugged(ec)
         batteryState = batteryStatus(ec[Reg.batteryStatus])
         psee = ec[Reg.battery] & 0x10 != 0
+        coolBoost = isCoolBoostOn(ec)
     }
 }
 

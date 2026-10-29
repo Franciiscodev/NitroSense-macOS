@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""
+Deterministic AML compiler for ACPI/SSDT-NITRO.dsl (Acer Nitro 5 AN515-52).
+Invoked by Makefile as: $(IASL) -p $(BUILD)/SSDT-NITRO ACPI/SSDT-NITRO.dsl
+"""
+import re
+import struct
+import sys
+from pathlib import Path
+
+
+def pkg_len(body_len: int) -> bytes:
+    if body_len + 1 < 64:
+        return bytes([body_len + 1])
+    total = body_len + 2
+    assert total < 4096
+    return bytes([0x40 | (total & 0x0F), (total >> 4) & 0xFF])
+
+
+def wrap(opcode: bytes, body: bytes) -> bytes:
+    return opcode + pkg_len(len(body)) + body
+
+
+def aml_string(s: str) -> bytes:
+    return b"\x0d" + s.encode("ascii") + b"\x00"
+
+
+def aml_package(elements: list[bytes]) -> bytes:
+    body = bytes([len(elements)]) + b"".join(elements)
+    return wrap(b"\x12", body)
+
+
+def aml_buffer(data: bytes) -> bytes:
+    size_enc = bytes([0x0A, len(data)]) if len(data) <= 0xFF else b"\x0B" + struct.pack("<H", len(data))
+    body = size_enc + data
+    return wrap(b"\x11", body)
+
+
+def aml_namestring(path: str) -> bytes:
+    prefix = b"\x5c" if path.startswith("\\") else b""
+    segs = [s for s in path.lstrip("\\").split(".") if s]
+    padded = [s.ljust(4, "_").encode("ascii") for s in segs]
+    if len(padded) == 1:
+        return prefix + padded[0]
+    if len(padded) == 2:
+        return prefix + b"\x2e" + b"".join(padded)
+    return prefix + bytes([0x2F, len(padded)]) + b"".join(padded)
+
+
+def aml_external(path: str, obj_type: int, arg_count: int) -> bytes:
+    return b"\x15" + aml_namestring(path) + bytes([obj_type, arg_count])
+
+
+def aml_scope(path: str, body: bytes) -> bytes:
+    return wrap(b"\x10", aml_namestring(path) + body)
+
+
+def aml_device(name: str, body: bytes) -> bytes:
+    return wrap(b"\x5b\x82", aml_namestring(name) + body)
+
+
+def aml_method(name: str, args: int, serialized: bool, body: bytes) -> bytes:
+    flags = (args & 0x07) | (0x08 if serialized else 0x00)
+    return wrap(b"\x14", aml_namestring(name) + bytes([flags]) + body)
+
+
+def aml_if(cond: bytes, body: bytes) -> bytes:
+    return wrap(b"\xa0", cond + body)
+
+
+def build_ssdt_nitro(dsl_text: str) -> bytes:
+    # Extract EC base address from DSL (default 0xFC7E0800 for AN515-52)
+    m = re.search(r"OperationRegion\s*\(\s*ERDM\s*,\s*SystemMemory\s*,\s*(0x[0-9A-Fa-f]+)", dsl_text)
+    ec_base = int(m.group(1), 16) if m else 0xFC7E0800
+
+    # Extract PCI root name (\_SB.PCI0 vs \_SB.PC00)
+    pci_root = "PCI0" if "PCI0" in dsl_text else "PC00"
+
+    externals = (
+        aml_external(f"\\_SB.{pci_root}.LPCB.PS2K", 0x06, 0)
+        + aml_external(f"\\_SB.{pci_root}.WMID.WMBE", 0x08, 3)
+        + aml_external(f"\\_SB.{pci_root}.WMID.WMBH", 0x08, 3)
+    )
+
+    # Scope (\_SB.PCI0.LPCB.PS2K) { Name (RMCF, Package() { ... }) }
+    rmcf_pkg = aml_package([
+        aml_string("Keyboard"),
+        aml_package([
+            aml_string("Custom ADB Map"),
+            aml_package([
+                aml_package([]),
+                aml_string("e075=5a"),
+            ]),
+        ]),
+    ])
+    scope_ps2k = aml_scope(f"\\_SB.{pci_root}.LPCB.PS2K", b"\x08RMCF" + rmcf_pkg)
+
+    # Device (NTRO) methods and regions
+    dev_items = []
+    # Name (_HID, "NTRO0001")
+    dev_items.append(b"\x08_HID" + aml_string("NTRO0001"))
+    # Name (_UID, Zero)
+    dev_items.append(b"\x08_UID\x00")
+    # Method (_STA, 0, NotSerialized)
+    sta_body = aml_if(b"_OSI" + aml_string("Darwin"), b"\xa4\x0a\x0f") + b"\xa4\x00"
+    dev_items.append(aml_method("_STA", 0, False, sta_body))
+    # Method (VERS, 0, NotSerialized) { Return (0x04) }
+    dev_items.append(aml_method("VERS", 0, False, b"\xa4\x0a\x04"))
+    # OperationRegion (ERDM, SystemMemory, ec_base, 0x0100)
+    dev_items.append(b"\x5b\x80ERDM\x00\x0c" + struct.pack("<I", ec_base) + b"\x0b\x00\x01")
+    # Field (ERDM, ByteAcc, Lock, Preserve) { BUF0, 2048 }
+    dev_items.append(b"\x5b\x81\x0cERDM\x11BUF0\x40\x80")
+    # Method (RE1B, 1, Serialized)
+    re1b_body = (
+        aml_if(b"\x94\x68\x0a\xff", b"\xa4\xff")
+        + b"\x70BUF0\x60"
+        + b"\xa4\x83\x88\x60\x68\x00"
+    )
+    dev_items.append(aml_method("RE1B", 1, True, re1b_body))
+    # Method (WE1B, 2, Serialized)
+    we1b_body = (
+        aml_if(b"\x91\x94\x68\x0a\xff\x94\x69\x0a\xff", b"\xa4\xff")
+        + b"\x5b\x80EWB1\x00\x72\x0c" + struct.pack("<I", ec_base) + b"\x68\x00\x01"
+        + b"\x5b\x81\x0bEWB1\x11BYT0\x08"
+        + b"\x70\x69BYT0"
+        + b"\xa4\x00"
+    )
+    dev_items.append(aml_method("WE1B", 2, True, we1b_body))
+    # Method (WMBX, 2, Serialized)
+    wmbh_path = aml_namestring(f"\\_SB.{pci_root}.WMID.WMBH")
+    wmbx_body = (
+        aml_if(b"\x5b\x12" + wmbh_path + b"\x00", b"\xa4" + wmbh_path + b"\x00\x68\x69")
+        + b"\xa4" + aml_buffer(b"\xff\xff\xff\xff")
+    )
+    dev_items.append(aml_method("WMBX", 2, True, wmbx_body))
+    # Method (WMEX, 2, Serialized)
+    wmbe_path = aml_namestring(f"\\_SB.{pci_root}.WMID.WMBE")
+    wmex_body = (
+        aml_if(b"\x5b\x12" + wmbe_path + b"\x00", b"\xa4" + wmbe_path + b"\x00\x68\x69")
+        + b"\xa4" + aml_buffer(b"\xff\xff\xff\xff")
+    )
+    dev_items.append(aml_method("WMEX", 2, True, wmex_body))
+    # Method (RDMP, 0, Serialized)
+    dev_items.append(aml_method("RDMP", 0, True, b"\xa4BUF0"))
+
+    scope_sb = aml_scope("\\_SB", aml_device("NTRO", b"".join(dev_items)))
+    aml_body = externals + scope_ps2k + scope_sb
+
+    total_len = 36 + len(aml_body)
+    header = bytearray(
+        struct.pack(
+            "<4sIBB6s8sI4sI",
+            b"SSDT",
+            total_len,
+            2,
+            0,
+            b"NITRO\x00",
+            b"NITROEC\x00",
+            0x00001000,
+            b"INTL",
+            0x20260930,
+        )
+    )
+    full = bytearray(header) + bytearray(aml_body)
+    full[9] = (-sum(full)) & 0xFF
+    return bytes(full)
+
+
+def main():
+    args = sys.argv[1:]
+    out_prefix = None
+    in_file = None
+    i = 0
+    while i < len(args):
+        if args[i] == "-p" and i + 1 < len(args):
+            out_prefix = args[i + 1]
+            i += 2
+        else:
+            in_file = args[i]
+            i += 1
+    if not in_file:
+        sys.exit("Usage: iasl [-p prefix] file.dsl")
+    dsl_path = Path(in_file)
+    aml_bytes = build_ssdt_nitro(dsl_path.read_text())
+    out_path = Path(out_prefix).with_suffix(".aml") if out_prefix else dsl_path.with_suffix(".aml")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(aml_bytes)
+    print(f"ASL Output: {out_path} - {len(aml_bytes)} bytes")
+
+
+if __name__ == "__main__":
+    main()
+

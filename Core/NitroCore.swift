@@ -120,13 +120,14 @@ final class NitroEC {
     }
 }
 
-// MARK: - AN515-57 EC map (offsets verified against DSDT field names)
+// MARK: - AN515-52 / AN515-57 EC map (offsets verified against DSDT.dsl + SSDT9 + nbfc-linux)
 
 enum Reg {
-    static let acStatus: Int = 0x00      // ACST
+    static let acStatus: Int = 0x00      // CDPR / ACST (bit 0)
     static let battery: Int = 0x03       // LMEN bit0, PSEE bit4 (gaming software present), BTHE bit6 (80 % limit)
     static let kbTimeout: Int = 0x06
     static let usbCharge: Int = 0x08
+    static let coolBoost: Int = 0x10     // CoolBoost (nbfc AN515-51/52/54: 0x01 on, 0x00 off)
     static let cpuFanRPM: Int = 0x13     // C1FR, 16-bit LE
     static let gpuFanRPM: Int = 0x15     // G1FR, 16-bit LE
     static let ledEffect: Int = 0x17     // KBLE
@@ -134,16 +135,38 @@ enum Reg {
     static let ledBright: Int = 0x19     // KBBP
     static let ledDir: Int = 0x1B        // KBED
     static let ledColor: Int = 0x1C      // KBCR, KBCG, KBCB
+    static let coolBoostFlag: Int = 0x20 // BBMS bit3 in AN515-52 DSDT/SSDT9
     static let gpuFanMode: Int = 0x21
     static let cpuFanMode: Int = 0x22
+    static let sysTempAlt: Int = 0x2A    // S1TV in AN515-52 DSDT/SSDT9
     static let nitroMode: Int = 0x2C     // OPMS
     static let cpuFanSpeed: Int = 0x37   // CPUF
     static let gpuFanSpeed: Int = 0x3A   // GPUF
     static let zoneColors: Int = 0x3C    // KB1R..KB4B
+    static let acAdapter: Int = 0xA3     // ADPT bit7 (0x80) in AN515-52 DSDT
     static let cpuTemp: Int = 0xB0       // CTMP
     static let sysTemp: Int = 0xB3       // SKTB
+    static let gpuTempAlt: Int = 0xB4    // SKTC in AN515-52 DSDT/SSDT9
     static let gpuTemp: Int = 0xB6       // EST1
     static let batteryStatus: Int = 0xC1 // BST0
+}
+
+func isACPlugged(_ ec: [UInt8]) -> Bool {
+    (ec[Reg.acAdapter] & 0x80 != 0) || (ec[Reg.acStatus] & 0x01 != 0)
+}
+
+func isCoolBoostOn(_ ec: [UInt8]) -> Bool {
+    ec[Reg.coolBoost] != 0
+}
+
+func readGPUTemp(_ ec: [UInt8]) -> UInt8 {
+    if ec[Reg.gpuTemp] != 0 { return ec[Reg.gpuTemp] }
+    if ec[Reg.gpuTempAlt] != 0 { return ec[Reg.gpuTempAlt] }
+    return readSysTemp(ec)
+}
+
+func readSysTemp(_ ec: [UInt8]) -> UInt8 {
+    ec[Reg.sysTemp] != 0 ? ec[Reg.sysTemp] : ec[Reg.sysTempAlt]
 }
 
 func hex(_ v: UInt8) -> String { String(format: "0x%02X", v) }
@@ -196,19 +219,18 @@ func rgb(_ ec: [UInt8], _ at: Int) -> String {
 
 func printStatus(_ ec: [UInt8]) {
     let u16 = { (at: Int) in Int(ec[at]) | Int(ec[at + 1]) << 8 }
-    let zones = (0..<4).map { rgb(ec, Reg.zoneColors + $0 * 3) }.joined(separator: " ")
+    let gpuT = readGPUTemp(ec)
+    let sysT = readSysTemp(ec)
 
     print("""
-    Temperatures   CPU \(ec[Reg.cpuTemp]) °C   GPU \(ec[Reg.gpuTemp]) °C   SYS? \(ec[Reg.sysTemp]) °C (0xB3, unverified)
+    Temperatures   CPU \(ec[Reg.cpuTemp]) °C   GPU \(gpuT) °C   SYS \(sysT) °C
     CPU fan        \(u16(Reg.cpuFanRPM)) RPM   mode \(fanMode(ec[Reg.cpuFanMode], cpu: true))   manual \(ec[Reg.cpuFanSpeed])%
     GPU fan        \(u16(Reg.gpuFanRPM)) RPM   mode \(fanMode(ec[Reg.gpuFanMode], cpu: false))   manual \(ec[Reg.gpuFanSpeed])%
-    Nitro mode     \(nitroMode(ec[Reg.nitroMode]))
+    CoolBoost      \(isCoolBoostOn(ec) ? "on" : "off") (0x10 = \(hex(ec[Reg.coolBoost])))
     PSEE flag      \(ec[Reg.battery] & 0x10 != 0 ? "on" : "off")
-    Power          AC \(ec[Reg.acStatus] & 0x01 == 1 ? "plugged" : "unplugged")   battery \(batteryStatus(ec[Reg.batteryStatus]))   80% limit \(ec[Reg.battery] & 0x40 != 0 ? "on" : "off") (\(hex(ec[Reg.battery])))
+    Power          AC \(isACPlugged(ec) ? "plugged" : "unplugged")   battery \(batteryStatus(ec[Reg.batteryStatus]))
     USB off-charge \(ec[Reg.usbCharge] == 0x0F ? "on" : ec[Reg.usbCharge] == 0x1F ? "off" : "? \(hex(ec[Reg.usbCharge]))")
     KB timeout 30s \(ec[Reg.kbTimeout] == 0x1E ? "on" : ec[Reg.kbTimeout] == 0x00 ? "off" : "? \(hex(ec[Reg.kbTimeout]))")
-    Keyboard LED   effect \(ledEffect(ec[Reg.ledEffect]))   speed \(ec[Reg.ledSpeed])   brightness \(ec[Reg.ledBright])   dir \(ec[Reg.ledDir])   color \(rgb(ec, Reg.ledColor))
-    LED zones 1-4  \(zones)   (last written to EC; run 'led restore' if the keyboard differs)
     """)
 }
 
@@ -238,30 +260,34 @@ enum FanUnit: CaseIterable {
 }
 
 func setPSEE(_ ec: NitroEC, _ on: Bool) throws {
-    let current = Int(try ec.readByte(UInt8(Reg.battery)))
-    let wanted = on ? current | 0x10 : current & ~0x10
-    if wanted != current {
-        try ec.writeByte(Reg.battery, wanted)
-    }
+    // AN515-52 does not use PSEE (0x03 bit 4 is reserved in DSDT ECMM; nbfc-linux only uses 0x10, 0x21, 0x22, 0x37, 0x3A).
+}
+
+// CoolBoost (EC 0x10: 0x01 on, 0x00 off — from nbfc-linux AN515-51/52/54 configs).
+func setCoolBoost(_ ec: NitroEC, _ on: Bool) throws {
+    try ec.writeByte(Reg.coolBoost, on ? 0x01 : 0x00)
 }
 
 let safeTempLimit: UInt8 = 90
 
-// Same order as OpeNitro: duty first, then mode. Duty is a percentage (firmware
-// WMBH 0x10 rejects > 100). PSEE is raised first, as NitroSense's WMBH 0x05 does.
+// Same order as OpeNitro / nbfc: disable CoolBoost for manual control, set PSEE,
+// then write duty first and mode second.
 func setFan(_ ec: NitroEC, _ units: [FanUnit], mode: String, percent: Int?, viaWMI: Bool) throws {
     if mode == "manual" {
-        guard let percent, (20...100).contains(percent) else {
-            throw NitroECError(description: "manual speed must be 20-100 (%)")
+        guard let percent, (0...100).contains(percent) else {
+            throw NitroECError(description: "manual speed must be 0-100 (%)")
         }
         let status = try ec.dump()
-        let hottest = max(status[Reg.cpuTemp], status[Reg.gpuTemp])
+        let hottest = max(status[Reg.cpuTemp], readGPUTemp(status))
         if hottest >= safeTempLimit && percent < 100 {
             throw NitroECError(description: "refusing manual \(percent)% at \(hottest) °C (limit \(safeTempLimit) °C); use 'max'")
         }
     }
 
     try setPSEE(ec, true)
+    if mode == "manual" {
+        _ = try? setCoolBoost(ec, false)
+    }
     for unit in units {
         switch mode {
         case "auto":
@@ -295,9 +321,18 @@ func setNitroMode(_ ec: NitroEC, _ name: String) throws {
     guard let value = nitroModes[name] else {
         throw NitroECError(description: "mode must be quiet, default or extreme")
     }
-    try checkWMBH(try ec.wmbh(0x16, [0x0B, 0x01]), "mode default")
-    if value != 0x01 {
-        try checkWMBH(try ec.wmbh(0x16, [0x0B, value]), "mode \(name)")
+    // AN515-57 uses WMBH 0x16; AN515-52 SSDT9 only implements WMBH 0x01..0x13.
+    if let res = try? ec.wmbh(0x16, [0x0B, 0x01]), res.first == 0 {
+        if value != 0x01 {
+            _ = try? ec.wmbh(0x16, [0x0B, value])
+        }
+    } else {
+        // Fallback for AN515-52: toggle CoolBoost for Quiet vs Extreme.
+        if name == "quiet" {
+            try? setCoolBoost(ec, false)
+        } else if name == "extreme" {
+            try? setCoolBoost(ec, true)
+        }
     }
 }
 
